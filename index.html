@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<title>TIR — NPV (VPL) em função da taxa de desconto mensal</title>
+<style>
+  :root {
+    --fg:#222;
+    --muted:#666;
+    --bg:#fff;
+    --accent:#000;
+    --card:#ffffff;
+    --border:#e9e9e9;
+    --shadow:0 1px 10px rgba(0,0,0,.05);
+  }
+  * { box-sizing:border-box; font-family: system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Arial; }
+  html, body { height:100%; }
+  body { margin:16px; background:var(--bg); color:var(--fg); }
+  h1 { font-size: clamp(18px, 2.6vw, 22px); margin:0 0 12px; line-height:1.2; }
+
+  .wrap {
+    display:grid;
+    grid-template-columns: 360px 1fr;
+    gap: 16px;
+    align-items:start;
+  }
+
+  .card {
+    border:1px solid var(--border);
+    border-radius:14px;
+    padding:14px;
+    background:var(--card);
+    box-shadow: var(--shadow);
+  }
+
+  .ctrl { margin-bottom:12px; }
+  .ctrl label { display:block; font-size:12px; color:var(--muted); margin-bottom:6px; }
+  .row { display:flex; gap:8px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
+  .row .val { font-variant-numeric: tabular-nums; font-weight:600; }
+
+  .note { font-size:12px; color:var(--muted); margin-top:8px; line-height:1.35; }
+
+  .btns { display:flex; gap:10px; margin-top:10px; flex-wrap:wrap; }
+  button { padding:8px 12px; border:1px solid #ddd; border-radius:10px; background:#fafafa; cursor:pointer }
+  button:hover{ background:#f0f0f0 }
+
+  .pill {
+    display:inline-flex; align-items:center; gap:6px;
+    padding:4px 10px; border:1px solid #e0e0e0; border-radius:999px;
+    font-size:12px; margin-right:6px; user-select:none; cursor:pointer;
+  }
+  .pill input { transform: translateY(0.5px); }
+
+  /* Canvas base: tamanho visual controla-se via JS; aqui só garante largura cheia */
+  canvas {
+    display:block;
+    width:100%;
+    height:auto; /* altura real é definida via atributo + JS para manter nitidez */
+    border:1px solid #eee;
+    border-radius:12px;
+    background:#fff;
+    touch-action: pan-y pinch-zoom;
+  }
+
+  .stat { font-size:14px; margin:6px 0; }
+
+  /* --------- Responsividade --------- */
+  @media (max-width: 980px) {
+    body { margin:12px; }
+    .wrap { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 420px) {
+    .pill { font-size:11px; padding:4px 8px; }
+    .ctrl label { font-size:11px; }
+    .note { font-size:11px; }
+    .stat { font-size:13px; }
+  }
+</style>
+</head>
+<body>
+  <h1>TIR — NPV (VPL) em função da taxa de desconto mensal</h1>
+
+  <div class="wrap">
+    <div class="card" id="controls">
+      <div class="ctrl">
+        <label>Política do Pix</label>
+        <div class="row" role="group" aria-label="Política do Pix">
+          <label class="pill"><input type="radio" name="pol" value="repassado" checked> Repassado</label>
+          <label class="pill"><input type="radio" name="pol" value="absorvido"> Absorvido</label>
+          <label class="pill"><input type="radio" name="pol" value="custom"> Personalizado</label>
+        </div>
+      </div>
+
+      <div class="ctrl">
+        <label for="inv">Investimento inicial (t0)</label>
+        <div class="row">
+          <input id="inv" type="range" min="1000" max="15000" step="50" value="5145.60" aria-label="Investimento inicial">
+          <div class="val" id="invv"></div>
+        </div>
+      </div>
+
+      <div class="ctrl">
+        <label for="mens">Resultado mensal (após fixos)</label>
+        <div class="row">
+          <input id="mens" type="range" min="200" max="3000" step="25" value="1325.26" aria-label="Resultado mensal">
+          <div class="val" id="mensv"></div>
+        </div>
+        <div class="note">Repassado (padrão): R$ 1.325,26 | Absorvido: R$ 1.116,27</div>
+      </div>
+
+      <div class="ctrl">
+        <label for="nmes">Horizonte (meses)</label>
+        <div class="row">
+          <input id="nmes" type="range" min="6" max="36" step="1" value="12" aria-label="Horizonte em meses">
+          <div class="val" id="nmesv"></div>
+        </div>
+      </div>
+
+      <div class="ctrl">
+        <label for="tmax">Taxa máxima no eixo (a.m.)</label>
+        <div class="row">
+          <input id="tmax" type="range" min="0.20" max="3.00" step="0.05" value="1.00" aria-label="Taxa máxima no eixo">
+          <div class="val" id="tmaxv"></div>
+        </div>
+      </div>
+
+      <div class="stat" id="stat" aria-live="polite"></div>
+      <div class="btns">
+        <button id="btnReset" type="button">Resetar</button>
+        <button id="btnPng"   type="button">Baixar PNG</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <!-- Importante: width/height são definidos por JS para ficar nítido em telas retina -->
+      <canvas id="chart"></canvas>
+      <div class="note">
+        A curva mostra o NPV (VPL) para diferentes taxas de desconto mensais. A TIR é o ponto onde a curva cruza a linha horizontal (NPV = 0).
+        Valores padrão do TeachSeek (MVP): investimento R$ 5.145,60; resultado mensal R$ 1.325,26 (Pix repassado); horizonte 12 meses.
+      </div>
+    </div>
+  </div>
+
+<script>
+/* ========= Helpers ========= */
+function brl(x){ return 'R$ ' + Number(x).toLocaleString('pt-BR', {maximumFractionDigits:2}); }
+function pct(x){ return (x*100).toFixed(2) + '%'; }
+function npv(rate, cashflows){
+  let s = 0;
+  for(let t=0;t<cashflows.length;t++) s += cashflows[t] / Math.pow(1+rate, t);
+  return s;
+}
+function irrBisection(cashflows, low=-0.99, high=5.0, tol=1e-8, maxIter=200){
+  function f(r){ return npv(r, cashflows); }
+  let fLow=f(low), fHigh=f(high);
+  let tries=0, exp=high;
+  while(fLow*fHigh>0 && exp<100){
+    exp*=2.0; fHigh=f(exp); tries++; if(tries>10) break;
+  }
+  if(fLow*fHigh>0) return NaN;
+  for(let i=0;i<maxIter;i++){
+    const mid=(low+high)/2.0, fMid=f(mid);
+    if(Math.abs(fMid)<tol) return mid;
+    if(fLow*fMid<0){ high=mid; fHigh=fMid; } else { low=mid; fLow=fMid; }
+  }
+  return (low+high)/2.0;
+}
+function niceStep(range, maxTicks){
+  // Escolhe steps "agradáveis" para evitar rótulos se sobrepondo no eixo X
+  const candidates = [0.05, 0.1, 0.2, 0.25, 0.5];
+  for(const s of candidates){
+    if(range / s <= maxTicks) return s;
+  }
+  // último caso: aumenta o step de acordo com o que couber
+  return Math.max(0.5, range / Math.max(1, maxTicks));
+}
+
+/* ========= Estado & elementos ========= */
+const defaults = { inv:5145.60, repassado:1325.26, absorvido:1116.27, nmes:12, tmax:1.00 };
+const els = {
+  inv:  document.getElementById('inv'),
+  mens: document.getElementById('mens'),
+  nmes: document.getElementById('nmes'),
+  tmax: document.getElementById('tmax'),
+  invv: document.getElementById('invv'),
+  mensv: document.getElementById('mensv'),
+  nmesv: document.getElementById('nmesv'),
+  tmaxv: document.getElementById('tmaxv'),
+  stat: document.getElementById('stat'),
+  canvas: document.getElementById('chart'),
+  btnReset: document.getElementById('btnReset'),
+  btnPng: document.getElementById('btnPng'),
+  radios: document.querySelectorAll('input[name=pol]')
+};
+
+/* ========= Canvas responsivo (retina friendly) ========= */
+function setCanvasSize(){
+  const container = els.canvas.parentElement;
+  const cssW = Math.max(280, Math.floor(container.clientWidth)); // largura em CSS px
+  // Altura responsiva: mais alta no desktop, mais compacta no mobile
+  const isMobile = window.innerWidth <= 420;
+  const cssH = Math.max(isMobile ? 260 : 380, Math.floor(cssW * (isMobile ? 0.60 : 0.48)));
+
+  const dpr = Math.min(2, window.devicePixelRatio || 1); // limita a 2x p/ não pesar
+  els.canvas.style.width = cssW + 'px';
+  els.canvas.style.height = cssH + 'px';
+  els.canvas.width  = Math.round(cssW * dpr);
+  els.canvas.height = Math.round(cssH * dpr);
+  const ctx = els.canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // escala para nitidez
+  return { cssW, cssH, dpr };
+}
+
+function updateLabels(){
+  els.invv.textContent  = brl(parseFloat(els.inv.value));
+  els.mensv.textContent = brl(parseFloat(els.mens.value));
+  els.nmesv.textContent = parseInt(els.nmes.value);
+  els.tmaxv.textContent = (parseFloat(els.tmax.value)*100).toFixed(0)+'%';
+}
+
+/* ========= Desenho ========= */
+function draw(){
+  const pol = [...els.radios].find(r=>r.checked).value;
+  if(pol==='repassado'){ els.mens.value = defaults.repassado; }
+  if(pol==='absorvido'){ els.mens.value = defaults.absorvido; }
+  els.mens.disabled = (pol!=='custom');
+
+  const inv  = parseFloat(els.inv.value);
+  const mensalEf = (pol==='repassado') ? defaults.repassado : (pol==='absorvido' ? defaults.absorvido : parseFloat(els.mens.value));
+  const nmes = parseInt(els.nmes.value);
+  const tmax = parseFloat(els.tmax.value);
+
+  const cashflows = [-inv]; for(let i=0;i<nmes;i++) cashflows.push(mensalEf);
+
+  const N=600;
+  const rates = Array.from({length:N}, (_,i)=> i*(tmax/(N-1)));
+  const npvs  = rates.map(r=> npv(r, cashflows));
+
+  const tir_m = irrBisection(cashflows);
+  const tir_a = (isFinite(tir_m) && !isNaN(tir_m)) ? (Math.pow(1+tir_m,12)-1) : NaN;
+
+  // Tamanho do canvas em CSS px (nítido por DPR)
+  const { cssW: W, cssH: H } = setCanvasSize();
+  const ctx = els.canvas.getContext('2d');
+  ctx.clearRect(0,0,W,H);
+
+  // Margens adaptativas (mobile usa menos margem)
+  const isNarrow = W < 420;
+  const m = { l:isNarrow?54:70, r:16, t:isNarrow?14:20, b:isNarrow?42:50 };
+  const x0=m.l, y0=m.t, x1=W-m.r, y1=H-m.b;
+  const plotW=x1-x0, plotH=y1-y0;
+
+  const minY = Math.min(...npvs, -inv*1.1);
+  const maxY = Math.max(...npvs,  inv*2.2);
+  const yMin = Math.min(minY, -1000);
+  const yMax = Math.max(maxY,  2000);
+
+  function x2px(x){ return x0 + (x/tmax)*plotW; }
+  function y2py(y){ return y1 - ( (y - yMin) / (yMax - yMin) ) * plotH; }
+
+  // Estilos de fonte proporcionais
+  const base = Math.max(10, Math.min(14, Math.floor(W/40)));
+  ctx.font = base + 'px system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Arial';
+  ctx.fillStyle = '#000';
+  ctx.strokeStyle = '#999';
+  ctx.lineWidth = 1;
+
+  // Eixos
+  ctx.beginPath(); ctx.moveTo(x0, y1); ctx.lineTo(x1, y1); ctx.stroke(); // eixo X
+  const yZero = y2py(0);
+  ctx.beginPath(); ctx.moveTo(x0, yZero); ctx.lineTo(x1, yZero); ctx.stroke(); // NPV=0
+
+  // Ticks X com step "inteligente" para não sobrepor
+  ctx.fillStyle = '#555'; ctx.textAlign='center'; ctx.textBaseline='top';
+  const maxXTicks = Math.max(5, Math.floor(plotW / 42)); // ~42px por rótulo
+  const stepX = niceStep(tmax, maxXTicks);
+  for(let p=0; p<=tmax + 1e-9; p += stepX){
+    const xx = x2px(p);
+    ctx.beginPath(); ctx.moveTo(xx, y1); ctx.lineTo(xx, y1+5); ctx.stroke();
+    ctx.fillText((p*100).toFixed(p<0.1 && stepX<0.1 ? 1 : 0) + '%', xx, y1+7);
+  }
+
+  // Ticks Y
+  ctx.textAlign='right'; ctx.textBaseline='middle';
+  const stepYraw = (yMax - yMin) / 8;
+  // aproxima para centenas
+  const stepY = Math.max(500, Math.round(stepYraw/100)*100);
+  for(let y=Math.ceil(yMin/stepY)*stepY; y<=yMax; y+=stepY){
+    const yy=y2py(y);
+    ctx.beginPath(); ctx.moveTo(x0-5, yy); ctx.lineTo(x0, yy); ctx.stroke();
+    ctx.fillText(brl(y), x0-8, yy);
+  }
+
+  // Títulos
+  ctx.fillStyle='#000'; ctx.textAlign='center'; ctx.textBaseline='bottom';
+  ctx.fillText('TIR — NPV (VPL) em função da taxa de desconto mensal', (x0+x1)/2, y0-4);
+  ctx.save(); ctx.rotate(-Math.PI/2); ctx.textAlign='center'; ctx.textBaseline='top';
+  ctx.fillText('NPV (VPL) em R$', -(y0+y1)/2, 12); ctx.restore();
+  ctx.textAlign='center'; ctx.textBaseline='top';
+  ctx.fillText('Taxa de desconto mensal', (x0+x1)/2, H-18);
+
+  // Curva NPV
+  ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
+  ctx.beginPath();
+  rates.forEach((r, i)=>{
+    const X = x2px(r), Y = y2py(npvs[i]);
+    if(i===0) ctx.moveTo(X, Y); else ctx.lineTo(X, Y);
+  });
+  ctx.stroke();
+
+  // Linha TIR
+  if(isFinite(tir_m) && !isNaN(tir_m)){
+    const xT = x2px(Math.min(Math.max(tir_m,0), tmax));
+    ctx.setLineDash([6,6]); ctx.strokeStyle='#000'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(xT, y0); ctx.lineTo(xT, y1); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath(); ctx.arc(xT, yZero, 4, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle='#000'; ctx.textAlign='left'; ctx.textBaseline='bottom';
+    const txt = `TIR ≈ ${(tir_m*100).toFixed(2)}% a.m.  (${(tir_a*100).toFixed(1)}% a.a.)`;
+    ctx.fillText(txt, Math.min(xT+10, x1-5), yZero-6);
+    els.stat.innerHTML = `TIR mensal: <b>${(tir_m*100).toFixed(2)}% a.m.</b> &nbsp;|&nbsp; TIR anual equivalente: <b>${(tir_a*100).toFixed(1)}% a.a.</b>`;
+  } else {
+    els.stat.textContent = 'TIR fora do intervalo — ajuste a taxa máxima ou o horizonte.';
+  }
+
+  // Labels dos controles
+  updateLabels();
+}
+
+/* ========= Eventos ========= */
+[els.inv, els.mens, els.nmes, els.tmax].forEach(e=> e.addEventListener('input', draw));
+els.radios.forEach(r=> r.addEventListener('change', draw));
+
+els.btnReset.addEventListener('click', ()=>{
+  els.inv.value = defaults.inv;
+  els.mens.value = defaults.repassado;
+  els.nmes.value = defaults.nmes;
+  els.tmax.value = defaults.tmax;
+  document.querySelector('input[name=pol][value="repassado"]').checked = true;
+  draw();
+});
+
+els.btnPng.addEventListener('click', ()=>{
+  const link = document.createElement('a');
+  link.download = 'tir_teachseek_interativo.png';
+  link.href = els.canvas.toDataURL('image/png');
+  link.click();
+});
+
+// Redesenha ao redimensionar / mudar orientação
+window.addEventListener('resize', draw);
+window.addEventListener('orientationchange', draw);
+
+// Primeira renderização
+draw();
+</script>
+</body>
+</html>
